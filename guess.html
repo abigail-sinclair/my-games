@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Угадай число</title>
+<style>
+  :root {
+    --bg:#1e1e2e; --panel:#181825; --line:#313244;
+    --text:#cdd6f4; --muted:#6c7086;
+    --blue:#89b4fa; --green:#a6e3a1; --red:#f38ba8;
+    --yellow:#f9e2af; --pink:#f5c2e7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(circle at 30% 20%, #24273a, #11111b 70%);
+    color:var(--text); font-family:system-ui, -apple-system, sans-serif; padding:16px;
+  }
+  .app {
+    width:100%; max-width:420px; background:var(--panel);
+    border:1px solid var(--line); border-radius:16px; padding:24px;
+    box-shadow:0 20px 60px rgba(0,0,0,.6);
+  }
+  h1 { font-size:22px; margin:0 0 4px; text-align:center; }
+  .sub { text-align:center; color:var(--muted); font-size:13px; margin-bottom:20px; }
+
+  .range {
+    display:flex; gap:8px; justify-content:center; margin-bottom:16px;
+  }
+  .range button {
+    background:var(--bg); border:1px solid var(--line); color:var(--text);
+    padding:6px 12px; border-radius:8px; cursor:pointer; font-size:13px;
+    transition:.15s;
+  }
+  .range button:hover { border-color:var(--blue); }
+  .range button.active { background:var(--blue); color:#11111b; border-color:var(--blue); font-weight:600; }
+
+  .stat {
+    display:flex; justify-content:space-between; font-size:13px;
+    color:var(--muted); margin-bottom:10px;
+  }
+  .stat b { color:var(--text); }
+
+  .bar {
+    height:10px; background:var(--bg); border-radius:99px; overflow:hidden;
+    margin-bottom:16px; position:relative;
+  }
+  .bar-fill {
+    height:100%; width:0%; border-radius:99px;
+    background:linear-gradient(90deg,#f38ba8,#fab387,#f9e2af,#a6e3a1,#89b4fa);
+    transition:width .3s ease, filter .3s;
+  }
+
+  .input-row { display:flex; gap:8px; margin-bottom:12px; }
+  input[type=number] {
+    flex:1; background:var(--bg); border:1px solid var(--line); color:var(--text);
+    padding:12px 14px; border-radius:10px; font-size:16px; outline:none;
+    transition:.15s;
+  }
+  input[type=number]:focus { border-color:var(--blue); }
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
+  input[type=number] { -moz-appearance:textfield; }
+
+  button.primary {
+    background:var(--blue); color:#11111b; border:none; padding:0 20px;
+    border-radius:10px; font-weight:700; font-size:15px; cursor:pointer;
+    transition:.15s;
+  }
+  button.primary:hover { filter:brightness(1.1); }
+  button.primary:disabled { opacity:.5; cursor:not-allowed; }
+
+  .msg {
+    min-height:44px; display:flex; align-items:center; justify-content:center;
+    font-size:15px; text-align:center; padding:10px; border-radius:10px;
+    background:var(--bg); margin-bottom:12px; transition:.2s;
+  }
+  .msg.good { background:rgba(166,227,161,.15); color:var(--green); }
+  .msg.bad { background:rgba(243,139,168,.15); color:var(--red); }
+  .msg.hint { color:var(--yellow); }
+
+  .history {
+    display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px;
+    max-height:100px; overflow-y:auto;
+  }
+  .chip {
+    padding:4px 10px; border-radius:99px; font-size:13px;
+    background:var(--bg); border:1px solid var(--line);
+  }
+  .chip.low  { border-color:var(--pink); color:var(--pink); }
+  .chip.high { border-color:var(--yellow); color:var(--yellow); }
+  .chip.win  { border-color:var(--green); color:var(--green); font-weight:600; }
+
+  .again { display:none; width:100%; padding:12px; margin-top:4px; }
+  .again.show { display:block; }
+  .over .primary { display:none; }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <h1>🎯 Угадай число</h1>
+  <div class="sub" id="sub">Выбери диапазон и попробуй угадать</div>
+
+  <div class="range" id="range">
+    <button data-max="10">1–10</button>
+    <button data-max="100" class="active">1–100</button>
+    <button data-max="1000">1–1000</button>
+  </div>
+
+  <div class="stat">
+    <span>Попыток: <b id="tries">0</b></span>
+    <span>Рекорд: <b id="best">—</b></span>
+  </div>
+
+  <div class="bar"><div class="bar-fill" id="barFill"></div></div>
+
+  <div class="input-row">
+    <input type="number" id="guess" placeholder="Введи число" autocomplete="off">
+    <button class="primary" id="checkBtn">Проверить</button>
+  </div>
+
+  <div class="msg" id="msg">Я загадал число. Сможешь угадать?</div>
+  <div class="history" id="history"></div>
+  <button class="primary again" id="againBtn">Играть снова</button>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const inputEl  = $('guess');
+const msgEl    = $('msg');
+const triesEl  = $('tries');
+const bestEl   = $('best');
+const histEl   = $('history');
+const barEl    = $('barFill');
+const againBtn = $('againBtn');
+const appEl    = $('app');
+
+let max = 100;
+let secret, tries, over, history;
+let best = loadBest();
+
+// ---------- сохранение рекордов ----------
+function bestKey(m) { return 'guessBest_' + m; }
+function loadBest() {
+  const obj = {};
+  for (const m of [10, 100, 1000]) {
+    try { obj[m] = parseInt(localStorage.getItem(bestKey(m)) || '0', 10) || null; }
+    catch (e) { obj[m] = null; }
+  }
+  return obj;
+}
+function saveBest(m, v) {
+  try { localStorage.setItem(bestKey(m), String(v)); } catch (e) {}
+  best[m] = v;
+}
+
+// ---------- старт новой игры ----------
+function newGame(newMax) {
+  if (newMax) {
+    max = newMax;
+    // подсветка активной кнопки диапазона
+    document.querySelectorAll('#range button').forEach(b =>
+      b.classList.toggle('active', +b.dataset.max === max));
+    $('sub').textContent = `Угадай число от 1 до ${max}`;
+  }
+  secret = 1 + Math.floor(Math.random() * max);
+  tries = 0;
+  over = false;
+  history = [];
+  triesEl.textContent = '0';
+  bestEl.textContent = best[max] ?? '—';
+  histEl.innerHTML = '';
+  inputEl.value = '';
+  inputEl.disabled = false;
+  $('checkBtn').disabled = false;
+  appEl.classList.remove('over');
+  againBtn.classList.remove('show');
+  setMsg('Я загадал число. Сможешь угадать?', '');
+  updateBar(null);
+  inputEl.focus();
+}
+
+// ---------- сообщение ----------
+function setMsg(text, cls) {
+  msgEl.textContent = text;
+  msgEl.className = 'msg' + (cls ? ' ' + cls : '');
+}
+
+// ---------- шкала «горячо-холодно» ----------
+function updateBar(guess) {
+  if (guess == null) { barEl.style.width = '0%'; return; }
+  const diff = Math.abs(guess - secret);
+  const pct = Math.max(0, 100 - (diff / max) * 100);
+  barEl.style.width = pct + '%';
+}
+
+// ---------- проверка попытки ----------
+function check() {
+  if (over) return;
+  const raw = inputEl.value.trim();
+  const g = Number(raw);
+  if (!raw || !Number.isFinite(g) || !Number.isInteger(g) || g < 1 || g > max) {
+    setMsg(`Введи целое число от 1 до ${max}`, 'bad');
+    inputEl.select();
+    return;
+  }
+
+  tries++;
+  triesEl.textContent = tries;
+  updateBar(g);
+
+  if (g === secret) {
+    over = true;
+    inputEl.disabled = true;
+    $('checkBtn').disabled = true;
+    addChip(g, 'win');
+    setMsg(`🎉 Угадала! Это ${secret}. Попыток: ${tries}`, 'good');
+    appEl.classList.add('over');
+    againBtn.classList.add('show');
+    againBtn.focus();
+    if (!best[max] || tries < best[max]) {
+      saveBest(max, tries);
+      bestEl.textContent = tries;
+      setMsg(`🏆 Новый рекорд! ${secret} · Попыток: ${tries}`, 'good');
+    }
+    return;
+  }
+
+  if (g < secret) {
+    addChip(g, 'low');
+    setMsg(`Моё число больше ⬆️`, 'hint');
+  } else {
+    addChip(g, 'high');
+    setMsg(`Моё число меньше ⬇️`, 'hint');
+  }
+
+  inputEl.value = '';
+  inputEl.focus();
+}
+
+function addChip(v, cls) {
+  const c = document.createElement('span');
+  c.className = 'chip ' + cls;
+  c.textContent = v;
+  histEl.appendChild(c);
+  histEl.scrollTop = histEl.scrollHeight;
+}
+
+// ---------- события ----------
+$('checkBtn').addEventListener('click', check);
+againBtn.addEventListener('click', () => newGame());
+inputEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); check(); }
+});
+
+document.querySelectorAll('#range button').forEach(b => {
+  b.addEventListener('click', () => newGame(+b.dataset.max));
+});
+
+// старт
+newGame(100);
+</script>
+</body>
+</html>

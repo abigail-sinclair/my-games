@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Поймай предмет</title>
+<style>
+  body { margin:0; min-height:100vh; display:flex; flex-direction:column;
+         align-items:center; justify-content:center;
+         background:#0b0b12; color:#e0e0e0; font-family:system-ui, sans-serif; }
+  canvas { border:2px solid #45475a; border-radius:10px;
+           box-shadow:0 10px 30px rgba(0,0,0,.5); touch-action:none; }
+  #hint { margin-top:10px; font-size:13px; color:#6c7086; text-align:center; }
+</style>
+</head>
+<body>
+<canvas id="game" width="480" height="600"></canvas>
+<div id="hint">← → или A/D или мышь — двигать корзинку · Пробел — пауза · R — заново</div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+// ---------- состояние ----------
+const keys = {};
+const player = { w: 96, h: 16, y: H - 56, x: W/2 - 48, speed: 560 };
+let items, score, lives, state, elapsed, spawnTimer, flashT, best;
+
+function loadBest() {
+  try { return parseInt(localStorage.getItem('catchBest') || '0', 10) || 0; }
+  catch (e) { return 0; }
+}
+function saveBest(v) {
+  try { localStorage.setItem('catchBest', String(v)); } catch (e) {}
+}
+best = loadBest();
+
+function reset() {
+  items = [];
+  score = 0;
+  lives = 3;
+  state = 'play';
+  elapsed = 0;
+  spawnTimer = 0.6;
+  flashT = 0;
+  player.x = W/2 - player.w/2;
+}
+
+// ---------- спавн предметов ----------
+const FRUIT_COLORS = ['#f38ba8', '#a6e3a1', '#fab387', '#89b4fa', '#cba6f7'];
+
+function spawnItem() {
+  const r = 11 + Math.random() * 6;
+  const x = r + Math.random() * (W - 2*r);
+
+  // чем дольше играешь — тем больше бомб
+  const bombChance = Math.min(0.4, 0.16 + elapsed * 0.012);
+  const roll = Math.random();
+  let type;
+  if (roll < bombChance) type = 'bomb';
+  else if (roll < bombChance + 0.1) type = 'gold';   // золотой фрукт = 3 очка
+  else type = 'fruit';
+
+  items.push({
+    x, y: -r - 2, r, type,
+    color: FRUIT_COLORS[Math.floor(Math.random() * FRUIT_COLORS.length)],
+    vy: Math.min(150 + elapsed * 9 + Math.random() * 70, 700)
+  });
+}
+
+// ---------- логика ----------
+function update(dt) {
+  elapsed += dt;
+
+  // движение корзинки
+  let dx = 0;
+  if (keys['arrowleft'] || keys['a'] || keys['ф']) dx -= 1;
+  if (keys['arrowright'] || keys['d'] || keys['в']) dx += 1;
+  player.x += dx * player.speed * dt;
+  player.x = Math.max(0, Math.min(W - player.w, player.x));
+
+  // таймер спавна (постепенно ускоряется)
+  spawnTimer -= dt;
+  if (spawnTimer <= 0) {
+    spawnItem();
+    spawnTimer = Math.max(0.3, 0.85 - elapsed * 0.014);
+  }
+
+  // предметы
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    it.y += it.vy * dt;
+
+    // поймали?
+    if (it.y + it.r >= player.y && it.y - it.r <= player.y + player.h &&
+        it.x + it.r >= player.x && it.x - it.r <= player.x + player.w) {
+      if (it.type === 'bomb') {
+        lives--;
+        flashT = 1;
+        if (lives <= 0) {
+          state = 'over';
+          if (score > best) { best = score; saveBest(best); }
+        }
+      } else {
+        score += it.type === 'gold' ? 3 : 1;
+      }
+      items.splice(i, 1);
+      continue;
+    }
+
+    // упал мимо
+    if (it.y - it.r > H) items.splice(i, 1);
+  }
+}
+
+// ---------- отрисовка ----------
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function drawItem(it) {
+  if (it.type === 'bomb') {
+    ctx.fillStyle = '#313244';
+    ctx.beginPath(); ctx.arc(it.x, it.y, it.r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#585b70'; ctx.lineWidth = 2; ctx.stroke();
+
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.beginPath(); ctx.arc(it.x - it.r*0.35, it.y - it.r*0.35, it.r*0.28, 0, Math.PI*2); ctx.fill();
+
+    // фитиль и искра
+    ctx.strokeStyle = '#a6adc8'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(it.x, it.y - it.r);
+    ctx.quadraticCurveTo(it.x + 7, it.y - it.r - 8, it.x + 3, it.y - it.r - 14);
+    ctx.stroke();
+    ctx.fillStyle = '#f9e2af';
+    ctx.beginPath(); ctx.arc(it.x + 3, it.y - it.r - 15, 3, 0, Math.PI*2); ctx.fill();
+    return;
+  }
+
+  // фрукт / золотой фрукт
+  ctx.fillStyle = it.type === 'gold' ? '#f9e2af' : it.color;
+  ctx.beginPath(); ctx.arc(it.x, it.y, it.r, 0, Math.PI * 2); ctx.fill();
+
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.beginPath(); ctx.arc(it.x - it.r*0.3, it.y - it.r*0.35, it.r*0.28, 0, Math.PI*2); ctx.fill();
+
+  // хвостик
+  ctx.strokeStyle = '#a6e3a1'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(it.x, it.y - it.r); ctx.lineTo(it.x + 3, it.y - it.r - 5); ctx.stroke();
+}
+
+function drawPlayer() {
+  const { x, y, w, h } = player;
+  ctx.fillStyle = '#89b4fa';
+  roundRect(x, y, w, h, 6); ctx.fill();
+
+  ctx.fillStyle = '#b4befe';
+  roundRect(x - 4, y - 4, w + 8, 8, 4); ctx.fill();
+
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  roundRect(x + 3, y + h - 4, w - 6, 4, 2); ctx.fill();
+}
+
+function drawHud() {
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#cdd6f4';
+  ctx.font = 'bold 20px system-ui';
+  ctx.fillText('Счёт: ' + score, 16, 32);
+
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#f38ba8';
+  ctx.fillText('♥'.repeat(Math.max(0, lives)), W - 16, 32);
+
+  if (best > 0) {
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#6c7086';
+    ctx.font = '13px system-ui';
+    ctx.fillText('Рекорд: ' + best, W/2, 30);
+  }
+}
+
+function drawOverlay(title, sub) {
+  ctx.fillStyle = 'rgba(17,17,27,0.78)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#cdd6f4';
+  ctx.font = 'bold 30px system-ui';
+  ctx.fillText(title, W/2, H/2 - 14);
+  ctx.font = '16px system-ui';
+  ctx.fillStyle = '#9399b2';
+  ctx.fillText(sub, W/2, H/2 + 18);
+}
+
+function draw() {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#11111b');
+  g.addColorStop(1, '#1e1e2e');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  // «земля»
+  ctx.fillStyle = 'rgba(255,255,255,0.035)';
+  ctx.fillRect(0, H - 40, W, 40);
+
+  for (const it of items) drawItem(it);
+  drawPlayer();
+  drawHud();
+
+  if (flashT > 0) {
+    ctx.fillStyle = 'rgba(243,139,168,' + (flashT * 0.28) + ')';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  if (state === 'pause') drawOverlay('Пауза', 'Пробел — продолжить');
+  if (state === 'over')  drawOverlay('Игра окончена',
+      'Счёт: ' + score + ' · Рекорд: ' + best + ' · R — заново');
+}
+
+// ---------- игровой цикл ----------
+let last = performance.now();
+
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);  // ограничиваем шаг
+  last = now;
+
+  if (state === 'play') update(dt);
+  if (flashT > 0) flashT = Math.max(0, flashT - dt * 2.5);
+
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ---------- управление ----------
+document.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  keys[k] = true;
+  if (['arrowleft','arrowright','arrowup','arrowdown',' '].includes(k)) e.preventDefault();
+  if (k === 'r') reset();
+  if (k === ' ') {
+    if (state === 'play') state = 'pause';
+    else if (state === 'pause') state = 'play';
+  }
+});
+document.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+// мышь / палец
+canvas.addEventListener('pointermove', e => {
+  if (state !== 'play') return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) * (W / rect.width);
+  player.x = Math.max(0, Math.min(W - player.w, mx - player.w / 2));
+});
+
+// ---------- старт ----------
+reset();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
